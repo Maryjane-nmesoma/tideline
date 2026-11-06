@@ -52,7 +52,7 @@ against the live services in October 2026.
 | EVM V2 | `eth_call usedNonces(bytes32)` (selector `0xfeb61724`) on `0x81D40F21F12A8F0E3252Bccb954D722d4c464B64`, same address on every chain. `1` means received |
 | EVM V1 | Same call on the per-chain V1 transmitter, with key `keccak256(uint32 sourceDomain, uint64 nonce)` |
 | Solana | Account at PDA `["used_nonce", eventNonce]` under program `CCTPV2Sm4AdWt5296sk4P66VBZ7bEhcARwFaaS9YPbeC`. If it exists the message was received, and its first signature is the mint transaction |
-| Stellar | Search recent `message_received` events for the message body |
+| Stellar | Find the burn's ledger from its timestamp, then read `message_received` events forward from there and match the message body. See below |
 
 A zero nonce reads as used on the V2 transmitter, so reachability probes must use a random nonce.
 
@@ -67,8 +67,28 @@ A zero nonce reads as used on the V2 transmitter, so reachability probes must us
   holders, and a metals issuer a $5B value. Rankings use holders. USD figures are labeled estimates, and volume is not
   shown.
 - `GET /asset/{CODE-ISSUER}/stats-history` returns one row per day (about 480 KB for USDC): `supply` in stroops, `trustlines` as `[total, authorized, funded]`, `payments` count. It feeds the institution history charts.
-- `GET /contract/{id}/events` returns Soroban events newest first. Event ids are TOIDs, so the ledger is
-  `id >> 32`.
+- `GET /contract/{id}/events` returns Soroban events, 200 per page. Event ids are `<TOID>-<event index>`, so the ledger
+  is `TOID >> 32`. `order=asc|desc` and `cursor=<TOID>-<index>` are supported, and `_links.next` follows the order. A
+  TOID built from a ledger (`ledger << 32`) is a valid starting cursor, which is how the mint check starts reading at
+  the burn instead of at the newest event. The contract's history begins in April 2026.
+
+## Finding a Stellar mint
+
+The Stellar MessageTransmitter emits one `message_received` event per mint, and its body contains the CCTP message
+Circle returns as `decodedMessage.messageBody`. There is no nonce to look up, so the check matches on the body.
+
+1. Take the burn timestamp from the source chain.
+2. Turn it into a ledger. Ledgers close about every 5.5 seconds, but not exactly, so a straight division drifts by hours
+   over a month. `lib/stellar-time.ts` does a secant search using Horizon `GET /ledgers/{seq}` (closed ledgers are
+   immutable, so they are cached for a day) and usually needs two or three lookups.
+3. Read the contract's events from that ledger forward (`order=asc&cursor=<ledger << 32>-0000`) and look for the message
+   body. A match is `minted`. Reaching the newest event (a short page) without a match proves the mint has not happened,
+   so the result is `pending`. Running out of time or pages first is `unknown`, with a note saying how far it got.
+4. Resolve the mint transaction. The event TOID with its low 12 bits cleared is the transaction's TOID, and Horizon uses it
+   as the paging token: `GET /transactions?cursor=<txTOID - 1>&limit=1&order=asc` returns exactly that transaction. This
+   works for any age. Soroban RPC `getEvents` (about 7 days of retention) is only the fallback.
+
+If the burn time is not known, the check falls back to scanning the newest 1,000 events, which can only confirm recent mints.
 
 ## SEP-1, SEP-6, SEP-24, SEP-31
 
@@ -77,12 +97,18 @@ on `TRANSFER_SERVER` (SEP-6), `TRANSFER_SERVER_SEP0024` (SEP-24) and `DIRECT_PAY
 deposit, withdraw and payment assets with fees and limits. Many institutions publish none of these, and some domains
 are slow or unreachable. The page reports that rather than guessing.
 
+Each request waits up to 12 seconds. A server that the `stellar.toml` lists but that does not answer is reported as
+**unreachable**, which is different from a server the anchor does not list (**not offered**). `stellar.toml` is controlled
+by the anchor, so URLs read from it are only fetched if they are plain public HTTPS hostnames (`isPublicHttpsUrl`);
+see `SECURITY.md`.
+
 ## Stellar Horizon and Soroban RPC
 
-- Horizon `https://horizon.stellar.org`: transaction facts for Stellar burns (time, ledger, fee, source account) and
-  account existence checks.
-- Soroban RPC `https://mainnet.sorobanrpc.com`: `getEvents`, used to find the transaction hash of a mint. Retention is
-  about 7 days.
+- Horizon `https://horizon.stellar.org`: transaction facts for Stellar burns (time, ledger, fee, source account),
+  account existence checks, ledger close times (to turn a burn timestamp into a ledger) and the transaction behind a mint
+  event, looked up by TOID. Full history.
+- Soroban RPC `https://mainnet.sorobanrpc.com`: `getEvents`, kept as a fallback to find the transaction hash of a mint.
+  Retention is about 7 days.
 
 ## DefiLlama
 
