@@ -159,9 +159,14 @@ export type SepAmountRule = {
   max: number | null;
 };
 
+export type SepService = "sep6" | "sep24" | "sep31";
+
 export type SepInfo = {
   domain: string;
-  services: { sep6: boolean; sep24: boolean; sep31: boolean };
+  /** True only when the anchor lists the server in stellar.toml and its /info answered */
+  services: Record<SepService, boolean>;
+  /** Servers the anchor lists but that did not answer. They are neither offered nor known to be absent. */
+  unreachable: SepService[];
   deposit: SepAmountRule[];
   withdraw: SepAmountRule[];
   /** SEP-31 cross-border payments the institution can receive */
