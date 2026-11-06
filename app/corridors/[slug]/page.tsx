@@ -90,21 +90,37 @@ function Ramps({ slug, hasDomain }: { slug: string; hasDomain: boolean }) {
             <span className="text-muted-foreground">Read live from {sep.data.domain}:</span>
             {(
               [
-                ["SEP-6", sep.data.services.sep6],
-                ["SEP-24", sep.data.services.sep24],
-                ["SEP-31", sep.data.services.sep31],
+                ["SEP-6", "sep6"],
+                ["SEP-24", "sep24"],
+                ["SEP-31", "sep31"],
               ] as const
-            ).map(([label, on]) => (
-              <Badge key={label} variant={on ? "secondary" : "outline"} className={on ? "" : "text-muted-foreground"}>
-                {label}
-                {on ? "" : " not offered"}
-              </Badge>
-            ))}
+            ).map(([label, key]) => {
+              const on = sep.data.services[key];
+              const down = sep.data.unreachable.includes(key);
+              return (
+                <Badge
+                  key={label}
+                  variant={on ? "secondary" : "outline"}
+                  className={on ? "" : down ? "border-amber-500/50 text-amber-600 dark:text-amber-400" : "text-muted-foreground"}
+                >
+                  {label}
+                  {on ? "" : down ? " unreachable" : " not offered"}
+                </Badge>
+              );
+            })}
           </div>
-          {sep.data.deposit.length + sep.data.withdraw.length + sep.data.receive.length === 0 ? (
+          {sep.data.unreachable.length > 0 && (
             <p className="text-sm text-muted-foreground">
-              The institution answers, but lists no deposit, withdrawal or payment assets.
+              {sep.data.unreachable.map((k) => k.toUpperCase().replace("SEP", "SEP-")).join(", ")} listed in stellar.toml
+              but did not answer in time. Its assets are missing below; try again shortly.
             </p>
+          )}
+          {sep.data.deposit.length + sep.data.withdraw.length + sep.data.receive.length === 0 ? (
+            sep.data.unreachable.length === 0 && (
+              <p className="text-sm text-muted-foreground">
+                The institution answers, but lists no deposit, withdrawal or payment assets.
+              </p>
+            )
           ) : (
             <>
               <RulesTable title="Deposit (fiat in, Stellar asset out)" rows={sep.data.deposit} />
