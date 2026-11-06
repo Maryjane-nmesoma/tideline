@@ -1,6 +1,6 @@
 # Tideline: Product Requirements
 
-**Status:** Phase 1 shipped. Phase 2 not started.
+**Status:** Phase 1 shipped. Phase 2 not started. Full Stellar mint history shipped after Phase 1. Open work is tracked in [`MILESTONE.md`](../MILESTONE.md).
 
 ## 1. Problem
 
@@ -57,11 +57,10 @@ the institutions on Stellar are.
 - **Rescue console.** Connect Freighter or MetaMask and submit a pending attestation to the destination when a relayer
   stalls. CCTP's destination caller rules decide who may do this.
 - **Preflight simulator.** Check a recipient trustline, contract TTL and post-dust amount before sending.
-- **Full Stellar mint history.** Index `message_received` events beyond the recent window so older inbound CCTP
-  transfers resolve to Completed.
-- **More destinations for mint checks** (Sui, Aptos, Starknet).
+- **More destinations for mint checks** (Sui, Aptos, Starknet, Noble). See [`MILESTONE.md`](../MILESTONE.md) M2.
+- **Browsable CCTP feed**, so CCTP transfers appear without searching a burn hash. See M1.
 - **SEP-24 and SEP-31 transfer tracking** for fiat settlement (PIX, SPEI, SEPA), building on the institution ramp data.
-- **Allbridge**, if a public API appears or a self-hosted instance is configured.
+- **Allbridge**, if a public API appears or a self-hosted instance is configured. See M3.
 - **Alerts** for stalled transfers and stablecoin supply drops.
 
 ## 6. Non-goals

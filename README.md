@@ -9,6 +9,10 @@
   Track Circle CCTP and LayerZero transfers, see why one is stuck, and explore the institutions behind Stellar's assets.
 </p>
 
+<p align="center">
+  <a href="https://tideline-opal.vercel.app"><strong>Live demo: tideline-opal.vercel.app</strong></a>
+</p>
+
 ---
 
 Cross-chain tooling on Stellar is split across vendor explorers that each show only their own leg. Tideline puts
@@ -70,6 +74,9 @@ No environment variables or API keys are needed.
 pnpm build        # production build
 pnpm start        # serve the build
 pnpm lint
+pnpm typecheck
+pnpm test         # unit tests, no network
+pnpm test:live    # tests against the real public APIs (slow, needs network)
 ```
 
 The first page load in dev compiles routes on demand and can take 20 to 30 seconds. To build or run a second copy
@@ -105,7 +112,7 @@ Circle's API only says a burn was **attested**. It never says the mint happened.
 |---|---|
 | 17 EVM chains | Reads `usedNonces` on the destination MessageTransmitter (V2, and V1 on the original six chains) |
 | Solana | Looks for the program's used-nonce account and reads its first signature as the mint transaction |
-| Stellar | Matches the burn message in `message_received` events on the Stellar MessageTransmitter (recent events only) |
+| Stellar | Finds the ledger of the burn from its timestamp, then reads the Stellar MessageTransmitter's `message_received` events forward from there and matches the burn message. Works for transfers of any age. Reaching the newest event without a match proves the mint has not happened |
 | Sui, Aptos, Starknet, Noble | Not checkable here, so the transfer shows as **Attested** |
 
 ### Dust
@@ -127,9 +134,11 @@ hooks/use-api.ts       every client data hook
 lib/
   adapters/            layerzero, circle, destination (mint checks), sep, stellar-expert, defillama
   config.ts            chain ids, CCTP domains, endpoints
-  dust.ts  keccak.ts  solana.ts  stellar.ts   pure helpers with no network access
+  dust.ts  keccak.ts  solana.ts  stellar.ts  stellar-time.ts   pure helpers with no network access
   search.ts            query classification and routing
-  types.ts             the Transfer model
+  types.ts             the app's own models (Transfer, SepInfo, ...)
+  upstream.ts          types for the third-party API responses the adapters read
+tests/                 unit tests (pnpm test); tests/live hits the real APIs (pnpm test:live)
 docs/                  product requirements and data source notes
 public/logo.svg
 ```
@@ -137,12 +146,13 @@ public/logo.svg
 ## Known limits
 
 - **CCTP has no public feed.** Circle publishes no list of transfers, so CCTP transfers appear only when you search
-  a burn transaction. The LayerZero feed is the only browsable one.
+  a burn transaction. The LayerZero feed is the only browsable one. Planned: [M1](MILESTONE.md#m1-browsable-cctp-feed).
+- **Mint checks do not cover Sui, Aptos, Starknet or Noble.** Transfers to those chains stop at Attested. Planned:
+  [M2](MILESTONE.md#m2-mint-checks-for-sui-aptos-starknet-and-noble).
 - **Allbridge Core is not integrated.** It has no public hosted API, only a self-hosted REST service. The overview
-  lists it as unavailable.
+  lists it as unavailable. Planned: [M3](MILESTONE.md#m3-allbridge-core).
 - **Bridge pool reserves are not public.** The liquidity page shows total stablecoin supply on Stellar instead, which
   is the closest observable signal of a float problem.
-- **Stellar mint checks look at recent events only.** An older inbound mint shows as Attested rather than Completed.
 - **Institution market values are estimates** (supply times last traded price) and unreliable for thin tokens, so
   institutions are ranked by holders.
 - **Stellar volume is low.** The 24 hour cards are often single digits. That is the real traffic.
@@ -151,10 +161,23 @@ public/logo.svg
 ## Stack
 
 Next.js 16 (App Router, Turbopack), React 19, TypeScript, Tailwind CSS v4, shadcn/ui and Radix primitives,
-TanStack Query v5, Recharts, next-themes, lucide-react. The layout and design tokens follow the sui-dashboard
+TanStack Query v5, Recharts, next-themes, lucide-react, Vitest. The layout and design tokens follow the sui-dashboard
 template.
 
 ## Docs
 
 - [`docs/PRD.md`](docs/PRD.md): product scope, what shipped and what is next
 - [`docs/DATA-SOURCES.md`](docs/DATA-SOURCES.md): every upstream, the identifiers used, and the gotchas found
+- [`MILESTONE.md`](MILESTONE.md): what is left to build, with a definition of done for each item
+- [`CHANGELOG.md`](CHANGELOG.md): what changed in each version
+
+## Contributing
+
+Contributions are welcome. Start with [`CONTRIBUTING.md`](CONTRIBUTING.md) for setup, the project's principles and how
+to add an adapter, then pick something from [`MILESTONE.md`](MILESTONE.md) or the issues labelled `good first issue`.
+Please read the [Code of Conduct](CODE_OF_CONDUCT.md). Report security problems privately, as described in
+[`SECURITY.md`](SECURITY.md).
+
+## License
+
+[MIT](LICENSE)
