@@ -12,8 +12,7 @@ import type {
   Verifier,
   VerifierState,
 } from "@/lib/types";
-
-type LzMessage = any;
+import type { LzDvn, LzMessage } from "@/lib/upstream";
 
 const STALL_AFTER_SECONDS = 60 * 60;
 
@@ -61,7 +60,7 @@ function buildVerifiers(msg: LzMessage): {
   quorum: { required: number; verified: number } | null;
 } {
   const cfg = msg.config?.inboundConfig;
-  const dvns: Record<string, any> = msg.verification?.dvn?.dvns ?? {};
+  const dvns: Record<string, LzDvn> = msg.verification?.dvn?.dvns ?? {};
   const names = new Map<string, string>();
   const requiredSet = new Set<string>();
 
@@ -144,7 +143,7 @@ function buildPipeline(
   const sealerTx = msg.verification?.sealer?.tx;
   const lastDvnTs = Math.max(
     0,
-    ...Object.values<any>(msg.verification?.dvn?.dvns ?? {}).map((d) => d.blockTimestamp ?? 0)
+    ...Object.values(msg.verification?.dvn?.dvns ?? {}).map((d) => d.blockTimestamp ?? 0)
   );
 
   const sourceDone = msg.source?.status === "SUCCEEDED";

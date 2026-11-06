@@ -10,7 +10,7 @@ import type {
   Transfer,
   TransferStatus,
 } from "@/lib/types";
-
+import type { IrisMessage } from "@/lib/upstream";
 
 const STALL_AFTER_SECONDS = 60 * 60;
 
@@ -38,10 +38,12 @@ export function parseCctpId(id: string) {
   return { srcDomain: Number(m[1]), txHash: m[2], index: Number(m[3]) };
 }
 
-const finalityLabel = (v: string | undefined) =>
-  v === "1000" ? "Fast (confirmed)" : v === "2000" ? "Standard (finalized)" : (v ?? "n/a");
+const finalityLabel = (v: string | number | undefined) => {
+  const s = v === undefined ? undefined : String(v);
+  return s === "1000" ? "Fast (confirmed)" : s === "2000" ? "Standard (finalized)" : (s ?? "n/a");
+};
 
-function buildMeta(msg: any, facts: SourceFacts, mint: MintCheck | null, dstName: string): MetaRow[] {
+function buildMeta(msg: IrisMessage, facts: SourceFacts, mint: MintCheck | null, dstName: string): MetaRow[] {
   const dm = msg.decodedMessage ?? {};
   const body = dm.decodedMessageBody ?? {};
   const rows: MetaRow[] = [{ label: "Protocol", value: `Circle CCTP V${msg.cctpVersion ?? "?"}` }];
@@ -74,7 +76,7 @@ function buildMeta(msg: any, facts: SourceFacts, mint: MintCheck | null, dstName
 }
 
 export function normalizeIrisMessage(
-  msg: any,
+  msg: IrisMessage,
   srcDomain: number,
   txHash: string,
   index: number,
@@ -219,7 +221,7 @@ async function irisMessages(domain: number, txHash: string): Promise<Transfer[]>
   const res = await fetchRetry(url, { next: { revalidate: 15 }, headers: { accept: "application/json" } });
   if (res.status === 404 || res.status === 400) return [];
   if (!res.ok) throw new Error(`Circle Iris responded ${res.status}`);
-  const json = (await res.json()) as { messages?: any[] };
+  const json = (await res.json()) as { messages?: IrisMessage[] };
   const messages = json.messages ?? [];
   if (messages.length === 0) return [];
 
