@@ -104,3 +104,36 @@ export function shortAddress(a: string, head = 6, tail = 4): string {
   if (a.length <= head + tail + 1) return a;
   return `${a.slice(0, head)}...${a.slice(-tail)}`;
 }
+
+/* ---------- Total order IDs (TOIDs) ----------
+   A TOID packs ledger (high 32 bits), transaction index (20 bits) and operation index (12 bits) into one integer.
+   Stellar Expert event ids are "<TOID>-<event index>", and Horizon uses the transaction TOID as its paging token. */
+
+const TOID_LEDGER_SHIFT = BigInt(32);
+const TOID_TX_SHIFT = BigInt(12);
+const ONE = BigInt(1);
+
+/** The TOID part of a Stellar Expert event id such as "280621759983910913-0006". */
+export function toidFromEventId(eventId: string): bigint | null {
+  const m = /^(\d+)(?:-\d+)?$/.exec(eventId);
+  return m ? BigInt(m[1]) : null;
+}
+
+export function ledgerFromToid(toid: bigint): number {
+  return Number(toid >> TOID_LEDGER_SHIFT);
+}
+
+/** The TOID of the transaction that produced an operation or event (operation index cleared). */
+export function txToid(toid: bigint): bigint {
+  return (toid >> TOID_TX_SHIFT) << TOID_TX_SHIFT;
+}
+
+/** First possible TOID in a ledger. Use it as an events cursor to start reading at that ledger. */
+export function toidForLedger(ledger: number): bigint {
+  return BigInt(ledger) << TOID_LEDGER_SHIFT;
+}
+
+/** Horizon returns transactions strictly after the cursor, so one below the TOID selects exactly that transaction. */
+export function horizonCursorForTx(toid: bigint): string {
+  return (txToid(toid) - ONE).toString();
+}
