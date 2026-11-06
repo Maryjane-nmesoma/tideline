@@ -1,0 +1,54 @@
+name: Bug report
+description: Something is wrong, for example a transfer shows the wrong status
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. A transaction hash is the most useful thing you can give us.
+        For security problems, do not file an issue. See SECURITY.md.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you see, and what did you expect instead?
+    validations:
+      required: true
+  - type: input
+    id: tx
+    attributes:
+      label: Transaction hash, GUID or address
+      description: The thing you searched or the page you were on.
+    validations:
+      required: false
+  - type: input
+    id: page
+    attributes:
+      label: Page or API route
+      placeholder: /transfers/cctp, /api/institutions/anclap/sep
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Go to ...
+        2. Search ...
+        3. See ...
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where are you running it?
+      options:
+        - Deployed site
+        - Local dev server
+        - Production build
+  - type: input
+    id: env
+    attributes:
+      label: Browser and Node version
+      placeholder: Firefox 130, Node 22.12
+  - type: textarea
+    id: logs
+    attributes:
+      label: Console or server log
+      render: shell
