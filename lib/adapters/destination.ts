@@ -1,6 +1,9 @@
 import { ENDPOINTS } from "@/lib/config";
 import { bytesToHex, hexToBytes, keccak256 } from "@/lib/keccak";
 import { findProgramAddress } from "@/lib/solana";
+import { horizonCursorForTx, ledgerFromToid, toidForLedger, toidFromEventId, txToid } from "@/lib/stellar";
+import { findLedgerAtTime, type LedgerPoint } from "@/lib/stellar-time";
+import type { ExpertEvent, ExpertEventPage } from "@/lib/upstream";
 
 /* Verifying a CCTP mint. Circle's Iris API only says a burn was attested; it never says the mint happened,
    so we ask the destination chain directly. */
@@ -140,47 +143,127 @@ async function checkSolana(eventNonce: string, version: number): Promise<MintChe
   throw lastError instanceof Error ? lastError : new Error("Solana RPC unavailable");
 }
 
-type ExpertEvent = { id: string; ts: number; bodyXdr?: string };
+const EXPERT_EVENTS = `https://api.stellar.expert/explorer/public/contract/${STELLAR_MESSAGE_TRANSMITTER}/events`;
+const EVENTS_PER_PAGE = 200;
+/** Total time one Stellar mint check may spend before it gives up and says so. */
+const STELLAR_BUDGET_MS = 25_000;
+const MAX_EVENT_PAGES = 12;
+
+async function horizonJson<T>(path: string, revalidate: number): Promise<T> {
+  const res = await fetch(`${ENDPOINTS.horizon}${path}`, {
+    signal: AbortSignal.timeout(TIMEOUT),
+    next: { revalidate },
+  });
+  if (!res.ok) throw new Error(`Horizon responded ${res.status}`);
+  return (await res.json()) as T;
+}
+
+async function latestLedger(): Promise<LedgerPoint> {
+  const j = await horizonJson<{ _embedded: { records: { sequence: number; closed_at: string }[] } }>(
+    "/ledgers?order=desc&limit=1",
+    30
+  );
+  const l = j._embedded.records[0];
+  return { seq: Number(l.sequence), ts: Math.floor(Date.parse(l.closed_at) / 1000) };
+}
+
+async function ledgerCloseTime(seq: number): Promise<number> {
+  // A closed ledger never changes, so this can be cached for a long time.
+  const l = await horizonJson<{ closed_at: string }>(`/ledgers/${seq}`, 86_400);
+  return Math.floor(Date.parse(l.closed_at) / 1000);
+}
+
+/** Events cursor that starts a little before the burn, found from the burn timestamp. */
+async function eventsCursorAt(sourceTs: number): Promise<string> {
+  const latest = await withRetry(latestLedger);
+  const ledger = await findLedgerAtTime(sourceTs, latest, (seq) => withRetry(() => ledgerCloseTime(seq)));
+  return `${toidForLedger(ledger)}-0000`;
+}
+
+async function fetchEventPage(url: string): Promise<ExpertEventPage> {
+  // Event pages are shared by every lookup, so a short cache makes repeat searches fast.
+  const res = await fetch(url, { signal: AbortSignal.timeout(TIMEOUT), next: { revalidate: 30 } });
+  if (!res.ok) throw new Error(`Stellar Expert responded ${res.status}`);
+  return (await res.json()) as ExpertEventPage;
+}
+
+const eventCarries = (ev: ExpertEvent, needle: string) =>
+  !!ev.bodyXdr && Buffer.from(ev.bodyXdr, "base64").toString("hex").includes(needle);
+
+/** Transaction that emitted an event. Horizon keeps full history; Soroban RPC only the last few days. */
+async function mintTxHash(eventId: string, needle: string): Promise<string | undefined> {
+  const toid = toidFromEventId(eventId);
+  if (toid === null) return undefined;
+  const viaHorizon = await withRetry(async () => {
+    const j = await horizonJson<{ _embedded: { records: { hash: string; paging_token: string }[] } }>(
+      `/transactions?cursor=${horizonCursorForTx(toid)}&limit=1&order=asc&include_failed=true`,
+      86_400
+    );
+    const rec = j._embedded.records[0];
+    return rec && BigInt(rec.paging_token) === txToid(toid) ? rec.hash : undefined;
+  }).catch(() => undefined);
+  return viaHorizon ?? (await sorobanTxHash(ledgerFromToid(toid), needle).catch(() => undefined));
+}
+
+async function minted(ev: ExpertEvent, needle: string): Promise<MintCheck> {
+  return {
+    state: "minted",
+    txHash: await mintTxHash(ev.id, needle),
+    timestamp: ev.ts,
+    note: "A message_received event on the Stellar MessageTransmitter carries this message.",
+  };
+}
+
+const isoDate = (sec: number) => new Date(sec * 1000).toISOString().slice(0, 16).replace("T", " ") + " UTC";
 
 /**
  * Stellar does not expose nonces in its events, but the received message body is the same burn message
- * Circle returns, so match on that. Only recent events are searched.
+ * Circle returns, so match on that.
+ *
+ * With the burn time known, find that ledger and read the MessageTransmitter's events forward from it. A mint can
+ * only come after its burn, so this covers transfers of any age, and reaching the newest event without a match
+ * proves the mint has not happened. Without a burn time it falls back to scanning only the newest events.
  */
 async function checkStellar(messageBody: string | null, sourceTs?: number): Promise<MintCheck> {
   if (!messageBody || !/^0x[0-9a-fA-F]+$/.test(messageBody)) {
     return { state: "unknown", note: "No message body to match against Stellar events." };
   }
   const needle = messageBody.slice(2).toLowerCase();
-  let url: string | null =
-    `https://api.stellar.expert/explorer/public/contract/${STELLAR_MESSAGE_TRANSMITTER}/events?limit=200&order=desc`;
-  let oldest = Infinity;
-  const deadline = Date.now() + 18_000;
+  const deadline = Date.now() + STELLAR_BUDGET_MS;
 
-  for (let page = 0; page < 5 && url && Date.now() < deadline; page++) {
-    // Event pages are shared by every lookup, so a short cache makes repeat searches fast.
-    const res = await fetch(url, { signal: AbortSignal.timeout(TIMEOUT), next: { revalidate: 30 } });
-    if (!res.ok) throw new Error(`Stellar Expert responded ${res.status}`);
-    const json = (await res.json()) as {
-      _embedded: { records: ExpertEvent[] };
-      _links?: { next?: { href: string } };
-    };
-    for (const ev of json._embedded.records) {
-      oldest = Math.min(oldest, ev.ts);
-      if (ev.bodyXdr && Buffer.from(ev.bodyXdr, "base64").toString("hex").includes(needle)) {
-        const ledger = Number(BigInt(ev.id.split("-")[0]) >> BigInt(32));
-        const txHash = await sorobanTxHash(ledger, needle).catch(() => undefined);
-        return {
-          state: "minted",
-          txHash,
-          timestamp: ev.ts,
-          note: "A message_received event on the Stellar MessageTransmitter carries this message.",
-        };
+  const cursor = sourceTs ? await eventsCursorAt(sourceTs).catch(() => null) : null;
+  if (cursor) {
+    let url: string | null = `${EXPERT_EVENTS}?limit=${EVENTS_PER_PAGE}&order=asc&cursor=${cursor}`;
+    let reached = 0;
+    for (let page = 0; page < MAX_EVENT_PAGES && url && Date.now() < deadline; page++) {
+      const json = await fetchEventPage(url);
+      const records = json._embedded.records;
+      const hit = records.find((ev) => eventCarries(ev, needle));
+      if (hit) return minted(hit, needle);
+      for (const ev of records) reached = Math.max(reached, ev.ts);
+      const next = json._links?.next?.href;
+      if (records.length < EVENTS_PER_PAGE || !next) {
+        return { state: "pending", note: "No matching message_received event on Stellar since the burn." };
       }
+      url = `https://api.stellar.expert${next}`;
     }
-    const next = json._links?.next?.href;
-    url = next && json._embedded.records.length === 200 ? `https://api.stellar.expert${next}` : null;
+    return {
+      state: "unknown",
+      note: `Searched Stellar events from the burn up to ${isoDate(reached)} without finding the mint, so it could not be confirmed.`,
+    };
   }
 
+  let url: string | null = `${EXPERT_EVENTS}?limit=${EVENTS_PER_PAGE}&order=desc`;
+  let oldest = Infinity;
+  for (let page = 0; page < 5 && url && Date.now() < deadline; page++) {
+    const json = await fetchEventPage(url);
+    for (const ev of json._embedded.records) {
+      oldest = Math.min(oldest, ev.ts);
+      if (eventCarries(ev, needle)) return minted(ev, needle);
+    }
+    const next = json._links?.next?.href;
+    url = next && json._embedded.records.length === EVENTS_PER_PAGE ? `https://api.stellar.expert${next}` : null;
+  }
   // The search window reached back past the burn, so a missing event means the mint has not happened.
   if (sourceTs && oldest < sourceTs) {
     return { state: "pending", note: "No matching message_received event on Stellar since the burn." };
