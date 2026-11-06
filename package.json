@@ -7,7 +7,10 @@
     "dev": "next dev --turbopack",
     "build": "next build --turbopack",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:live": "TIDELINE_LIVE=1 vitest run tests/live"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.15",
@@ -37,6 +40,20 @@
     "eslint-config-next": "16.1.1",
     "tailwindcss": "^4",
     "tw-animate-css": "^1.3.8",
-    "typescript": "^5"
-  }
+    "typescript": "^5",
+    "vitest": "^3.2.7"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Maryjane-nmesoma/tideline.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Maryjane-nmesoma/tideline/issues"
+  },
+  "homepage": "https://github.com/Maryjane-nmesoma/tideline#readme",
+  "engines": {
+    "node": ">=20.9.0"
+  },
+  "packageManager": "pnpm@10.22.0"
 }
