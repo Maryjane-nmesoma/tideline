@@ -1,10 +1,9 @@
 import { fetchRetry } from "@/lib/fetch";
 import type { AssetHistoryPoint, Institution, InstitutionAsset } from "@/lib/types";
+import type { ExpertAsset, ExpertHistoryRow } from "@/lib/upstream";
 
 const BASE = "https://api.stellar.expert/explorer/public";
 const STROOP = 1e7;
-
-type Raw = any;
 
 export function slugify(s: string) {
   return s
@@ -23,7 +22,7 @@ function displayName(legal: string) {
   return ALIASES[raw] ?? raw;
 }
 
-function toAsset(r: Raw): InstitutionAsset {
+function toAsset(r: ExpertAsset): InstitutionAsset {
   const toml = r.tomlInfo ?? r.toml ?? {};
   const price = typeof r.price === "number" ? r.price : null;
   const supply = Number(r.supply ?? 0) / STROOP;
@@ -73,9 +72,9 @@ export async function fetchInstitutions(): Promise<Institution[]> {
     headers: { accept: "application/json" },
   });
   if (!res.ok) throw new Error(`Stellar Expert responded ${res.status}`);
-  const json = (await res.json()) as { _embedded: { records: Raw[] } };
+  const json = (await res.json()) as { _embedded: { records: ExpertAsset[] } };
 
-  const groups = new Map<string, Raw[]>();
+  const groups = new Map<string, ExpertAsset[]>();
   for (const r of json._embedded.records) {
     const org: string | undefined = r.tomlInfo?.orgName;
     if (!org || r.asset === "XLM") continue;
@@ -104,7 +103,7 @@ export async function fetchInstitutions(): Promise<Institution[]> {
       name,
       legalName,
       domain: rows.find((r) => r.domain)?.domain ?? null,
-      logo: rows.find((r) => r.tomlInfo?.orgLogo)?.tomlInfo.orgLogo ?? null,
+      logo: rows.find((r) => r.tomlInfo?.orgLogo)?.tomlInfo?.orgLogo ?? null,
       assets,
       valueUsd: assets.reduce((a, x) => a + x.valueUsd, 0),
       holders: assets.reduce((a, x) => a + x.holders, 0),
@@ -128,7 +127,7 @@ export async function fetchAssetHistory(code: string, issuer: string, days = 110
   });
   if (res.status === 404) return [];
   if (!res.ok) throw new Error(`Stellar Expert responded ${res.status}`);
-  const rows = (await res.json()) as Raw[];
+  const rows = (await res.json()) as ExpertHistoryRow[];
   return rows.slice(-days).map((r) => ({
     date: Number(r.ts),
     supply: Number(r.supply ?? 0) / STROOP,
